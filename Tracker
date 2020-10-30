@@ -1,0 +1,1351 @@
+#SingleInstance force
+#NoEnv
+Vrs = v2.3.0 ;UPDATE THIS EVERY NEW VERSION
+Wnm = Production Tracker %vrs%
+Qhold =
+Gcolor = Default
+Global Psed = 0
+Global InMode = 0
+Path = ;This should be a path pointing to ...\Production.bat
+OPathO = ;This should be a path pointing to the folder where the output files should be stored.
+Lnch = ;This should be a path pointing to ...\Production Tracker Launcher.exe
+Pth = ;This should be a path pointing to "...\WAT.bat" (and make sure to keep it in quotes)
+ChkPath =  ;This should point to ...\PChk.txt
+;Secondary crash test control:
+ChkPath2 = ;This should point to ...\PChk2.txt
+
+;These are paths for local redundant backup files.
+Dir1 = C:\Users\%A_UserName%\Documents\WT
+Dir2 = %Dir1%\Hstry
+Dir3 = C:\Users\%A_UserName%\Documents\WT\BU
+
+;Junk path:
+;OPath1 = ...\Temp Timestamps
+
+;Check to see where to route time punch data by comparing the username. The following two lines get the username and the left two characters of the username.
+EnvGet, Comp, computername
+StringLeft, Cmp, Comp, 2
+;Location registry:
+If (A_UserName = "Training") {
+	Msg = Hello! You're signed into the Training profile, but using the production version of the Production Tracker. Your time punches unfortunately can't be attributed to you, so please ask your trainer about the training tracker. Thanks!
+	MsgBox, 0, Training version, %Msg%, 10
+	ExitApp
+}
+If (Cmp = "K1" or Cmp = "K2" or Cmp = "M1") {
+	OPath1 = ...\Work Tracking ;This should be a full path where outputs for these particular user types should go.
+	OPath2 = %Dir1%
+}
+If (Cmp = "V1" or Cmp = "H1") {
+	OPath1 = ...\Work Tracking 2 ;This should also be a full path, but where these other types should go. This set of checks can be repeated ad nauseam to create a sort of rerouting directory.
+	OPath2 = %Dir1%
+}
+If (Cmp != "V1" and Cmp != "K1" and Cmp != "K1" and Cmp != "M1" and Cmp != "H1" and Cmp != "C1") {
+	Msg = Hello! It appears this tracker isn't designed for you to use at the moment, so please have your supervisor submit a Reporting & Analysis Ticket with a screenshot of this message: Please add %Comp% to the registry.
+	MsgBox, 0, Oops!, %Msg%, 60
+	ExitApp
+}
+
+if !FileExist(Dir1) {
+	FileCreateDir, %Dir1%
+}
+if !FileExist(Dir2) {
+	FileCreateDir, %Dir2%
+}
+if !FileExist(Dir3) {
+	FileCreateDir, %Dir3%
+}
+InProg = 0
+
+;Define columns and lists===============================================================
+UsrCol := "A" ;username
+UnqCol := "B" ;unique ID
+NowCol := "C" ;submission time
+CasCol := "D" ;case number
+TypCol := "E" ;task type
+FncCol := "F" ;functional area
+QueCol := "G" ;task queue
+S1Col := "H" ;task 1
+S2Col := "I" ;task 2
+S3Col := "J" ;task 3
+S4Col := "K" ;task 4
+TstCol := "L" ;task status
+OthCol := "M" ;other explanation
+TchCol := "N" ;number of touches
+VtCol := "O" ;work start time
+VnCol := "P" ;work end time
+EvtCol := "Q" ;event
+PSCol := "R" ;pause start time
+PECol := "S" ;pause end time
+VrsCol := "T" ;version
+
+;The following lists define the options that appear in the input-dependent selection boxes.
+EligibilityTaskList := "|Option 1|Option 2|Option 3|Option 4|Option 5|Option 6|Option 7|Option 8|Option 9|Option 10|Option 11|Option 12|Option 13|Option 14|Option 15|Option 16|Option 17|Option 18|Option 19|Option 20|Option 21|Option 22|Option 23|Option 24|Option 25|Option 26|Option 27|Option 28|Option 29|Option 30|Option 31|Option 32|Option 33|Option 34|Option 35|Option 36|Option 37|Option 38|Option 39|Option 40|Option 41|Option 42|Option 43|Option 44|Option 45|Option 46|Option 47|Option 48|Option 49|Option 50|Option 51|Option 52|Option 53|Option 54|Option 55|Option 56|Option 57|Option 58|Option 59|Option 60|Option 61|Option 62|Option 63|Option 64|Option 65|Option 66|Option 67|Option 68|Option 69|Option 70|Option 71|Option 72|Option 73|Option 74|Option 75|Option 76|Option 77|Option 78|Option 79|Option 80|Option 81|Option 82|Option 83|Option 84|Option 85|Option 86|Option 87|Option 88|Option 89|Option 90|Option 91|Option 92|Option 93|Option 94|Option 95|Option 96|Option 97|Option 98|Option 99|Option 100|Option 101|Option 102|Option 103|Option 104|Option 105|Option 106|Option 107|Option 108|Option 109|Option 110|Option 111|Option 112|Option 113|Option 114|Option 115|Option 116|Option 117|Option 118|Option 119|Option 120|Option 121|Option 122|Option 123|Option 124|Option 125|Option 126|Option 127|Option 128|Option 129|Option 130|Option 131|Option 132|Option 133|Option 134|Option 135|Option 136|Option 137|Option 138|Option 139|Option 140|Option 141|Option 142|Option 143|Option 144|Option 145|Option 146|Option 147|Option 148|Option 149|Option 150|Option 151|Option 152|Option 153|Option 154|Option 155|Option 156|Option 157|Option 158|Option 159|Option 160|Option 161|Option 162"
+
+DETaskList := "|DE Option 1|DE Option 2"
+
+REGTaskList := "|REG Option 1|REG Option 2|REG Option 3|REG Option 4|REG Option 5|REG Option 6|REG Option 7|REG Option 8|REG Option 9|REG Option 10|REG Option 11|REG Option 12"
+
+LSNTaskList := "|LSN Option 1|LSN Option 2|-" . EligibilityTaskList
+
+CMsg := "Please close this tool when you leave!"
+Ctext := "Case Number "
+CasLen = 0
+
+;This section prevents the XL assignment from interfering with current or new instances of Excel.
+XL2 := ComObjCreate("Excel.Application")
+Workbook := XL2.Workbooks.Add ;It's invisible by default.
+Workbook.Close(false)
+;End section. Keep this section above the XL section to force this instance of Excel to open first and force XL to create a separate Excel instance.
+
+;Create GUI and start data generation===============================================================
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+output = %A_UserName%,StartTracking,%VNow%,%Vrs%`n
+Global CapTime = false
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+Gui, Add, GroupBox, x12 y12 w720 h113, Work Tracker:
+Ttl := " Last Punch:"
+Gui, Add, Text, x278 y12 w62 h20 , %Ttl%
+Gui, Add, Text, x22 y35 w140 h20 , Production:
+Gui, Add, Button,x122 y32 w40 h20 gProdIn vProdIn, In
+Gui, Add, Button,x222 y32 w40 h20 gProdOut vProdOut, Out
+	Gui, Add, Text, x282 y35 w110 h20 vPTime, --:-- --
+Gui, Add, Text, x22 y65 w140 h20 , Break:
+Gui, Add, Button,x122 y62 w40 h20 gBreakIn vBreakIn , In
+Gui, Add, Button,x222 y62 w40 h20 gBreakOut vBreakOut , Out
+	Gui, Add, Text, x282 y65 w110 h20 vBTime, --:-- --
+Gui, Add, Text, x22 y95 w140 h20 , Lunch:
+Gui, Add, Button,x122 y92 w40 h20 gLunchIn30 vLunchIn30 , 30
+Gui, Add, Button,x172 y92 w40 h20 gLunchIn60 vLunchIn60 , 60
+Gui, Add, Button,x222 y92 w40 h20 gLunchOut vLunchOut , Out
+	Gui, Add, Text, x282 y95 w110 h20 vLTime, --:-- --
+
+Gui, Add, Text, x608 y12 w62 h20 , %Ttl%
+Gui, Add, Text, x402 y35 w140 h20 , Training:
+Gui, Add, Button,x502 y32 w40 h20 gTrainingIn vTrainingIn , In
+Gui, Add, Button,x552 y32 w40 h20 gTrainingOut vTrainingOut , Out
+	Gui, Add, Text, x612 y35 w110 h20 vTTime, --:-- --
+Gui, Add, Text, x402 y65 w140 h20 , Meeting:
+Gui, Add, Button,x502 y62 w40 h20  gMeetingIn vMeetingIn, In
+Gui, Add, Button,x552 y62 w40 h20  gMeetingOut vMeetingOut, Out
+	Gui, Add, Text, x612 y65 w110 h20 vMTime, --:-- --
+Gui, Add, Text, x402 y95 w140 h20 , Special Project:
+Gui, Add, Button,x502 y92 w40 h20 gSpecProjIn vSpecProjIn , In
+Gui, Add, Button,x552 y92 w40 h20 gSpecProjOut vSpecProjOut , Out
+	Gui, Add, Text, x612 y95 w110 h20 vSTime, --:-- --
+
+GuiControl, Disable, ProdOut
+GuiControl, Disable, BreakOut
+GuiControl, Disable, LunchOut
+GuiControl, Disable, TrainingOut
+GuiControl, Disable, MeetingOut
+GuiControl, Disable, SpecProjOut
+
+Gui, Add, Button, x12 y135 w260 h40 gCnc vCnc, Cancel Case Work
+GuiControl, Hide, Cnc
+Gui, Add, Button, x12 y135 w260 h40 gStrt vStrt, Start Case Work
+GuiControl, Disable, Strt
+Gui, Add, Button, x282 y135 w100 h40 gWAT vWAT, Get Cases
+Gui, Add, Button, x602 y135 w130 h40 gShow1 vShow1, Show Case History
+GuiControl, Disable, Show1
+Gui, Add, Text, Center x394 y148 w200 h20 cGray vCfnd, Looking for your file...
+
+Gui, Add, Groupbox, x12 y187 w178 h307, Basics
+Gui, Add, Text, x22 y207 w158 h20 vClabel, %Ctext%(%CasLen%)
+Gui, Add, Edit, x22 y227 w158 h20 gCaseNum1 vCaseNum
+Gui, Add, Text, x22 y254 w158 h20, Task Type
+Gui, Add, DropDownList, x22 y274 w158 h220 vTType, Type 1|Type 2|Type 3|Type 4|Type 5|Type 6
+Gui, Add, Text, x22 y302 w158 h20, Task Status
+Gui, Add, DropDownList, x22 y322 w158 h220 vTst gTst1, Status 1|Status 2|Status 3
+Gui, Add, Text, x22 y350 w158 h20 vOexp, Explanation (20 left)
+Gui, Add, Edit, x22 y370 w158 h20 vOtxt gOtxt1
+Gui, Add, DropDownList, x22 y370 w158 h220 vOexp1, Explanation 1|Explanation 2|Explanation 3|Explanation 4
+GuiControl, Hide, Oexp1
+Gui, Add, Text, x22 y398 w158 h20, Functional Area
+Gui, Add, DropDownList, x22 y418 w158 h220 vFnct, FA1|FA2|FA3
+Gui, Add, Text, x22 y446 w158 h20, Number of Touches
+Gui, Add, Edit, x22 y466 w158 h20 vTchs
+
+Gui, Add, Groupbox, x202 y187 w530 h525, Task Selection
+Gui, Add, Radio, cBlue x303 y185 w70 h20 gElig vElig, Eligibility
+Gui, Add, Radio, cBlue x373 y185 w80 h20 gDE vDE, Data Entry
+Gui, Add, Radio, cBlue x453 y185 w85 h20 gREG vREG, Registration
+Gui, Add, Radio, cBlue x538 y185 w60 h20 gLSN vLSN, Liaison
+Gui, Add, Text, x212 y207 w210 h20, Task 1 (Most common on top)
+Gui, Add, ListBox, x212 y225 w250 h230 vSub1
+Gui, Add, Text, x472 y207 w210 h20, Task 2
+Gui, Add, ListBox, x472 y225 w250 h230 vSub2
+Gui, Add, Text, x212 y457 w210 h20, Task 3
+Gui, Add, ListBox, x212 y475 w250 h230 vSub3
+Gui, Add, Text, x472 y457 w210 h20, Task 4
+Gui, Add, ListBox, x472 y475 w250 h230 vSub4
+
+Gui, Add, Button, x12 y504 w178 h158 gSbmt vSbmt, Submit`n(stop case work)
+Gui, Add, Button, x12 y672 w178 h40 gClear, Clear form`n(without submitting)
+
+Gui, Color, %Gcolor%
+Gui, Show, w744 h182, %wnm%
+
+FileRead, Cvrs, %Path%
+;Testing; comment the next line out to return to normal operation
+	;Cvrs := "2.3.0"
+StringReplace, Vchk, Vrs, v,, All
+If not InStr(Cvrs, Vchk, false) {
+	Msg1 = The Production Tracker has been updated. Please close and relaunch via the official Production Tracker Launcher.
+	MsgBox, 0, Hello!, %Msg1%, 10
+	goto, GuiClose
+}
+
+SetTimer, UpdateC, 1000
+Gosub, UpdateC
+
+;IfNotExist, %OPath%
+	gosub, CreateIt
+
+GuiControl, +cGreen, Cfnd
+GuiControl, , Cfnd, Your case work file is ready!
+GuiControl, Enable, Show1
+if (InMode = 0) {
+	gosub, InModeCheck
+}
+Sleep, 10000
+GuiControl, +cRed, Cfnd
+GuiControl, , Cfnd, %CMsg%
+return
+
+InModeCheck:
+Sleep, 3000
+if (InMode = 0) {
+	GuiControl, +cBlue, Cfnd
+	GuiControl, , Cfnd, Enter a work mode to enable case work.
+}
+return
+
+UpdateC:
+;Send, {F15}
+WinGet, ThisID, Count, %wnm%
+WinGet, Msgs, Count, Too many instances!
+If (ThisID > 1) {
+	If (Msgs < 2) {
+		MsgMulti = Whoops! You've launched me more than once. Try single-clicking the launcher next time. If you keep seeing this message, restart your computer.
+		MsgBox, 0, Too many instances!, %MsgMulti%, 5
+	}
+	goto, GuiClose
+}
+
+;Crash test:
+	FileRead, CloseCheck, %ChkPath%
+	StringLeft, CloseCheck, CloseCheck, 5
+	if (CloseCheck = "Close")
+		GoTo, CloseIt
+	;~ FileRead, CloseCheck, %ChkPath2%
+	;~ StringLeft, CloseCheck, CloseCheck, 5
+	;~ if (CloseCheck = "Close")
+		;~ GoTo, CloseIt
+;Local data backup:
+pX = %mX%
+pY = %mY%
+if (A_Now > chtime) then {
+	FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+	FormatTime, VNow2, %A_Now%, MMddyyyy
+	chtime = %A_Now%
+	chtime := chtime + 30
+	oput = %A_UserName%`,%VNow%`,%Vrs%`n
+	FileAppend, %oput%, %Dir1%\Timestamps%VNow2%%A_UserName%.txt	
+	MouseGetPos, mX, mY
+	If (pX = mX and pY = mY) {
+		Mousemove, 1, 1, 0
+		Mousemove, mX, mY, 0
+	}
+}
+;Normal:
+FormatTime, Alert, %A_Year%%A_Mon%%A_DD%202000, yyyyMMddHHmmss ;202000 = 8:20 PM
+FormatTime, Alert2, %A_Year%%A_Mon%%A_DD%202900, yyyyMMddHHmmss ;202900 = 8:29 PM
+FormatTime, Dest, %A_Year%%A_Mon%%A_DD%203000, yyyyMMddHHmmss ;203000 = 8:30 PM
+FormatTime, TimeString,, h:mm:ss
+FormatTime, DestTime, %Dest%, time
+GuiControl,, Clock, %Current%
+if (A_Now = Alert) {
+	Gui, Flash, 5
+	Msg = This tool will close in 10 minutes. If you have any data that has not been submitted by that time, it will be lost (you'll get a 1-minute warning).
+	MsgBox, 0, Closing soon, %Msg% , 10
+}
+if (A_Now = Alert2) {
+	Gui, Flash, 5
+	Msg = This tool will close in 1 minute.
+	MsgBox, 0, Closing soon, %Msg% , 10
+}
+if (A_Now >= Dest) {
+	goto, CloseIt
+}
+return
+
+CreateIt:
+FormatTime, Mnth, %A_Now%, yyyyMMdd
+OPath = %OPathO%\%A_UserName%%Mnth%.csv
+OPathBU = %Dir3%\%A_UserName%PT%Mnth%.csv
+IfNotExist, %OPath%
+	GoSub, CreateNew
+return
+CreateNew:
+GuiControl, +cBlue, Cfnd
+GuiControl, , Cfnd, Creating a file for you. Please wait...
+Output = Username`,Unique ID`,Submission Time`,Case/App/Task/ImageNow ID`,Task Type`,Functional Area`,Task Queue`,Task 1`,Task 2`,Task 3`,Task 4`,Task Status`,Other Explanation`,Touches`,Start Time`,End Time`,Event`,Pause Start`,Pause End`,Version`n
+FileAppend, %Output%, %OPath%
+FileAppend, %Output%, %OPathBU%
+return
+
+GuiClose:
+Gui, Submit, NoHide
+if (TType or CaseNum or Tst or Otxt or Fnct or Tchs or Sub1 or Sub2 or Sub3 or Sub4) {
+	Msg1 = You've entered data that you haven't submitted. Do you really want to exit without submitting? (Auto-close in 10 seconds.)
+	MsgBox, 260, Closing, %Msg1%, 10
+	;260 = 256 (2nd button default) + 4 (Yes/No)
+	IfMsgBox Yes
+		goto, CloseIt
+	IfMsgBox Timeout
+		goto, CloseIt
+	IfMsgBox No
+		return
+}
+else
+	goto, CloseIt
+return
+
+CloseIt:
+;Close everything
+GuiControl, +cPurple, Cfnd
+GuiControl, , Cfnd, Shutting down...
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+if (InProg = 1 and Psed = 1) {
+	FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+	if (i) {
+		XL.Range(PECol . i).Value := VNow
+		Workbook.Save()
+	}
+}
+output = 
+If (CapTime = true) then {
+	output = %VNow%`n
+}
+output = %output%%A_UserName%,StopTracking,%VNow%`n
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+Try XL.Quit
+Try XL3.Quit
+Try Workbook.Close(false)
+Try Hist.Close(false)
+XL =
+XL2 =
+XL3 =
+Hist =
+ExitApp
+return
+
+;Production Tracker===============================================================
+WAT:
+Run, %Pth%
+return
+
+Strt:
+;Try Hist.Close(false)
+GuiControl, Show, Cnc
+GuiControl, Disable, Cnc
+GuiControl, Disable, Sbmt
+GuiControl, Hide, Strt
+GuiControl, +cBlue, Cfnd
+GuiControl, , Cfnd, Preparing form...
+WinMove,%GuiHwnd%,,,,,751
+FormatTime, UID, %A_Now%, yyMMddHHmmss
+FormatTime, VThen, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+
+Guicontrol, Choose, Sub1, 0
+if (Qhold = "E") {
+	GuiControl, , Elig, 1
+	gosub, Elig
+}
+if (Qhold = "D") {
+	GuiControl, , DE, 1
+	gosub, DE
+}
+if (Qhold = "R") {
+	GuiControl, , REG, 1
+	gosub, REG
+}
+if (Qhold = "L") {
+	GuiControl, , LSN, 1
+	gosub, LSN
+}
+
+Global InProg = 1
+Sleep, 1000
+If (InMode = 1) {
+	gosub, InModeCheckStrt
+}
+return
+
+InModeCheckStrt:
+Sleep, 1000
+If (InMode = 1) {
+	GuiControl, Enable, Cnc
+	GuiControl, Enable, Sbmt
+	GuiControl, +cGreen, Cfnd
+	GuiControl, , Cfnd, Form ready!
+	Sleep, 4000
+	GuiControl, +cRed, Cfnd
+	GuiControl, , Cfnd, %Cmsg%
+}
+return
+
+Elig:
+GuiControl, -Redraw, Sub1
+GuiControl, -Redraw, Sub2
+GuiControl, -Redraw, Sub3
+GuiControl, -Redraw, Sub4
+GuiControl, , Sub1, |No Task%EligibilityTaskList%
+GuiControl, , Sub2, |%EligibilityTaskList%
+GuiControl, , Sub3, |%EligibilityTaskList%
+GuiControl, , Sub4, |%EligibilityTaskList%
+Ctext := "Number "
+GuiControl, , Clabel, %Ctext%(%CasLen%)
+GuiControl, +Redraw, Sub1
+GuiControl, +Redraw, Sub2
+GuiControl, +Redraw, Sub3
+GuiControl, +Redraw, Sub4
+Qhold = E
+return
+
+DE:
+GuiControl, -Redraw, Sub1
+GuiControl, -Redraw, Sub2
+GuiControl, -Redraw, Sub3
+GuiControl, -Redraw, Sub4
+GuiControl, , Sub1, |No Task%DETaskList%
+GuiControl, , Sub2, |%DETaskList%
+GuiControl, , Sub3, |%DETaskList%
+GuiControl, , Sub4, |%DETaskList%
+Ctext := "Given ID "
+GuiControl, , Clabel, %Ctext%(%CasLen%)
+GuiControl, +Redraw, Sub1
+GuiControl, +Redraw, Sub2
+GuiControl, +Redraw, Sub3
+GuiControl, +Redraw, Sub4
+Qhold = D
+return
+
+REG:
+GuiControl, -Redraw, Sub1
+GuiControl, -Redraw, Sub2
+GuiControl, -Redraw, Sub3
+GuiControl, -Redraw, Sub4
+GuiControl, , Sub1, |No Task%REGTaskList%
+GuiControl, , Sub2, |%REGTaskList%
+GuiControl, , Sub3, |%REGTaskList%
+GuiControl, , Sub4, |%REGTaskList%
+Ctext := "Second ID "
+GuiControl, , Clabel, %Ctext%(%CasLen%)
+GuiControl, +Redraw, Sub1
+GuiControl, +Redraw, Sub2
+GuiControl, +Redraw, Sub3
+GuiControl, +Redraw, Sub4
+Qhold = R
+return
+
+LSN:
+GuiControl, -Redraw, Sub1
+GuiControl, -Redraw, Sub2
+GuiControl, -Redraw, Sub3
+GuiControl, -Redraw, Sub4
+GuiControl, , Sub1, |No Task%LSNTaskList%
+GuiControl, , Sub2, |%LSNTaskList%
+GuiControl, , Sub3, |%LSNTaskList%
+GuiControl, , Sub4, |%LSNTaskList%
+Ctext := "Number 2 "
+GuiControl, , Clabel, %Ctext%(%CasLen%)
+GuiControl, +Redraw, Sub1
+GuiControl, +Redraw, Sub2
+GuiControl, +Redraw, Sub3
+GuiControl, +Redraw, Sub4
+Qhold = L
+return
+
+Cnc:
+;Cancel button
+Gui, Submit, NoHide
+if (CaseNum or TType or Tst or Fnct or Tchs or Sub1 or Sub2 or Sub3 or Sub4) {
+	Msg1 = You've entered data that you haven't submitted. Do you really want to cancel? (Auto-cancel in 10 seconds.)
+	MsgBox, 4, Closing, %Msg1%, 10
+	IfMsgBox Yes
+		gosub, CncConfirm
+	IfMsgBox Timeout
+		gosub, CncConfirm
+	IfMsgBox No
+		return
+}
+else
+	gosub, CncConfirm
+return
+
+CncConfirm:
+;Try Hist.Close(false)
+gosub, Clear
+Global InProg = 0
+GuiControl, Show, Strt
+GuiControl, Disable, Strt
+GuiControl, Hide, Cnc
+WinMove,%GuiHwnd%,,,,,211
+GuiControl, +cGray, Cfnd
+GuiControl, , Cfnd, Preparing form...
+Sleep, 500
+if (InMode = 0) {
+	gosub, InModeCheckCnc
+}
+Sleep, 1000
+if (InMode = 1) {
+	GuiControl, Enable, Strt
+	GuiControl, +cGreen, Cfnd
+	GuiControl, , Cfnd, Ready for next case.
+}
+Sleep, 4000
+GuiControl, +cRed, Cfnd
+GuiControl, , Cfnd, %CMsg%
+return
+
+InModeCheckCnc:
+Sleep, 500
+if (InMode = 0) {
+	GuiControl, +cBlue, Cfnd
+	GuiControl, , Cfnd, Enter a work mode to enable case work.
+}
+return
+
+Sbmt:
+Gui, Submit, NoHide
+Skp = false
+GuiControl, +cBlack, Cfnd
+GuiControl, , Cfnd, Submitting data...
+error =
+Cnum := LTrim(Trim(RegExReplace(CaseNum, "[^0-9]")),"0")
+Cnum2 := Trim(CaseNum)
+	Len2 := StrLen(Cnum2)
+	Len := StrLen(Cnum)
+	CLet := StrLen(RegExReplace(CaseNum, "[0-9]"))	
+Tnum := LTrim(Trim(RegExReplace(Tchs, "[^0-9]")),"0")
+	TLen := StrLen(Tnum)
+	TLet := StrLen(RegExReplace(Tchs, "[0-9]"))
+Otxt := Trim(RegExReplace(Otxt, ","))
+OLen := StrLen(Otxt)
+Que =
+if (Elig)
+	Que := "Eligibility"
+if (DE)
+	Que := "Data Entry"
+if (REG)
+	Que := "Registration"
+if (LSN)
+	Que := "Liaison"
+
+If Not(Cnum) {
+	Ctext2 := Trim(Ctext)
+	error = %error%%Ctext2%`r	
+}
+if (Len != 8 and Cnum and (Qhold = "E" or Qhold = "L"))
+	error = %error%Case Number should be 8 digits with no leading zeroes`r	
+if (Len != 8 and Len != 7 and Cnum and Qhold = "R")
+	error = %error%Case Number should be 8 digits and App ID should be 7 digits with no leading zeroes`r
+if (Len != 8 and Len2 != 36 and Len2 != 23 and (Cnum or Cnum2) and Qhold = "D")
+	error = %error%Task ID should be 36 digits and ImageNow ID should be 23 digits (with dashes)`r
+if (CLet > 0 and Cnum) {
+	if (Qhold = "E" or Qhold = "L")
+		error = %error%Case Number should contain only numbers`r
+	if (Qhold = "R")
+		error = %error%Case Number/App ID should contain only numbers`r
+}
+if Not(TType)
+	error = %error%Task Type`r
+if Not(Tst)
+	error = %error%Task Status`r
+if (OLen > 20 and Tst != "Status 3")
+	error = %error%Other explanation must be 20 characters or less (without commas)`r
+if (Tst = "Status 3" and Oexp1 = "")
+	error = %error%'Pend to Pend' requires an explanation`r
+if Not(Fnct)
+	error = %error%Functional Area`r
+if Not(Tnum)
+	error = %error%Number of Touches`r
+if (TLet > 0 and Tnum)
+	error = %error%Number of Touches should only contain numbers`r
+if (TLen >= 3)
+	error = %error%This can't have been touched more than 99 times`r
+if not (Sub1)
+	error = %error%Task 1`r
+if (Sub1 = "-")
+	Sub1 := "No Task"
+if (Sub2 = "-")
+	Sub2 =
+if (Sub3 = "-")
+	Sub3 =
+if (Sub4 = "-")
+	Sub4 =
+if ((Sub2 or Sub3 or Sub4) and Sub1 = "No Task") {
+	Skp = true
+	error = %error%Tasks 2, 3, and 4 must be blank if there's no Task 1.`r
+}
+if ((Sub3) and !(Sub2) and Skp = "false")
+	error = %error%Task 2 must be present if Task 3 is.`r
+if ((Sub4) and !(Sub3) and Skp = "false")
+	error = %error%Task 3 must be present if Task 4 is.`r
+if (error) {
+	GuiControl, Disable, Sbmt
+	GuiControl, Disable, Cnc
+	GuiControl, +cRed, Cfnd
+	GuiControl, , Cfnd, Errors found!
+	error = Please add or correct the following information:`r%error%
+	msgbox, , Oops!, %error%, 20
+	GuiControl, +cRed, Cfnd
+	GuiControl, , Cfnd, %CMsg%
+	If (Psed = 0) {
+		GuiControl, Enable, Sbmt
+		GuiControl, Enable, Cnc
+	}
+	return
+}
+
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, Mnth, %A_Now%, yyyyMMdd
+OPath = %OPathO%\%A_UserName%%Mnth%.csv
+OPathBU = %Dir3%\%A_UserName%PT%Mnth%.csv
+
+if (Qhold != "D")
+	Cnum := CNum
+if (Qhold = "D")
+	Cnum := CNum2
+
+if (Tst = "Status 3") {
+	Otxt = %Oexp1%
+}
+
+gosub, CreateIt
+Output = %A_UserName%`,%UID%`,%VNow%`,%Cnum%`,%TType%`,%Fnct%`,%Que%`,%Sub1%`,%Sub2%`,%Sub3%`,%Sub4%`,%Tst%`,%Otxt%`,%Tnum%`,%VThen%`,%VNow%`,Submitted`,`,`,%Vrs%`n
+FileAppend, %Output%, %OPath%
+FileAppend, %Output%, %OPathBU%
+
+GuiControl, +cGreen, Cfnd
+GuiControl, , Cfnd, Record submitted!
+
+;Try Hist.Close(false)
+
+Global InProg = 0
+gosub, Clear
+GuiControl, Show, Strt
+GuiControl, Hide, Cnc
+WinMove,%GuiHwnd%,,,,,210
+
+Sleep, 3000
+
+GuiControl, +cRed, Cfnd
+GuiControl, , Cfnd, %CMsg%
+
+return
+
+Pse:
+Global Psed = 1
+GuiControl, Disable, Sbmt
+GuiControl, Disable, Cnc
+GuiControl, +cGreen, Cfnd
+GuiControl, , Cfnd, Pausing...
+;Try Hist.Close(false)
+FormatTime, PsTm, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+Global PsTm := PsTm
+
+GuiControl, +cBlue, Cfnd
+GuiControl, , Cfnd, Case work paused.
+
+return
+
+Rsm:
+Global Psed = 0
+GuiControl, +cGreen, Cfnd
+GuiControl, , Cfnd, Resuming...
+;Try Hist.Close(false)
+FormatTime, RsTm, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, Mnth, %A_Now%, yyyyMMdd
+OPath = %OPathO%\%A_UserName%%Mnth%.csv
+OPathBU = %Dir3%\%A_UserName%PT%Mnth%.csv
+Output = %A_UserName%`,%UID%`,%VNow%`,`,`,`,`,`,`,`,`,`,`,`,`,`,Paused`,%PsTm%`,%RsTm%`,%Vrs%`n
+FileAppend, %Output%, %OPath%
+FileAppend, %Output%, %OPathBU%
+	;~ XL.Range(PECol . i).Value := RsTm
+	;~ Workbook.Save()
+Sleep, 2000
+GuiControl, Enable, Sbmt
+GuiControl, Enable, Cnc
+GuiControl, +cGreen, Cfnd
+GuiControl, , Cfnd, Case work resumed.
+Sleep, 4000
+GuiControl, +cRed, Cfnd
+GuiControl, , Cfnd, %CMsg%
+return
+
+Clear:
+CaseNum =
+TType =
+Tst =
+Fnct =
+Sub1 =
+Sub2 =
+Sub3 =
+Sub4 =
+Tchs =
+Otxt =
+GuiControl, , Otxt, % Otxt
+GuiControl, , CaseNum, % CaseNum
+Guicontrol, Choose, TType, 0
+Guicontrol, Choose, Tst, 0
+Guicontrol, Choose, Fnct, 0
+Guicontrol, Choose, Oexp1, 0
+GuiControl, , Tchs, % Tchs
+Guicontrol, Choose, Sub1, 1 ;Scroll to top
+	Guicontrol, Choose, Sub1, 0 ;Clear selection
+Guicontrol, Choose, Sub2, 1
+	Guicontrol, Choose, Sub2, 0
+Guicontrol, Choose, Sub3, 1
+	Guicontrol, Choose, Sub3, 0
+Guicontrol, Choose, Sub4, 1
+	Guicontrol, Choose, Sub4, 0
+gosub, Tst1
+return
+
+CaseNum1:
+Gui, Submit, NoHide
+CasLen := StrLen(CaseNum)
+GuiControl, , Clabel, %Ctext%(%CasLen%)
+return
+
+Otxt1:
+Gui, Submit, NoHide
+Otxt := Trim(RegExReplace(Otxt, ","))
+ExLen := 20 - StrLen(Otxt)
+GuiControl, +cBlack, Oexp
+if (ExLen < 0)
+	GuiControl, +cRed, Oexp
+GuiControl, , Oexp, Explanation (%ExLen% left)
+return
+
+Tst1:
+Gui, Submit, NoHide
+If (Tst = "Status 3") {
+	GuiControl, +cBlack, Oexp
+	GuiControl, , Oexp, Reason*
+	GuiControl, Show, Oexp1
+	GuiControl, Hide, Otxt
+}
+If (Tst != "Status 3") {
+	GuiControl, +cBlack, Oexp	
+	GuiControl, Hide, Oexp1
+	GuiControl, Show, Otxt
+	gosub, Otxt1
+}
+return
+
+Show1:
+GuiControl, , Show1, Opening...
+XL := ComObjCreate("Excel.Application")
+Try TestName := Hist.Name
+Try Hist.Close(false)
+if (testname != "" and WinExist(testname)) {
+	ErMsg := "Existing history can't be closed, so I can't display any updates." . Chr(10) . "Are you editing a cell?" . Chr(10) . "Is there a prompt you need to click?" . Chr(10) . Chr(10) . "Close it manually and try again."
+	MsgBox, , Can't close, %ErMsg%, 10
+	goto, SkipHere
+}
+FormatTime, Mnth, %A_Now%, yyyyMMdd
+OPath = %OPathO%\%A_UserName%%Mnth%.csv
+HPath = %Dir2%\%A_UserName%%Mnth%.csv
+FileCopy, %OPath%, %Dir2%, 1
+	If (A_LastError > 0) {
+		ErMsg := "I was unable to copy an updated version of your history. Please close all open history documents (or all Excel files)." . Chr(10) . Chr(10) . "Ask your supervisor to check your production history and alert someone about this failure."
+		MsgBox, , Can't open, %ErMsg%, 10
+		goto, SkipHere
+	}
+	Try Hist := XL.Workbooks.Open(HPath)
+	If (A_LastError > 0) {
+		ErMsg := "Sorry, but something is preventing me from opening your history. Ask your supervisor to check your production history and alert someone about this failure."
+		MsgBox, , Can't open, %ErMsg%, 10
+		goto, SkipHere
+	}
+	XL.Visible := True
+	try TestName := Hist.Name
+SkipHere:
+GuiControl, , Show1, Show Case History
+return
+
+
+;Time Punch Tracker===============================================================
+ProdIn:
+Gui, Submit, NoHide
+Ps = False
+Global InMode = 1
+;Disable controls:
+GuiControl, Disable, ProdIn
+GuiControl, Disable, BreakIn
+GuiControl, Disable, LunchIn30
+GuiControl, Disable, LunchIn60
+GuiControl, Disable, LunchOut
+GuiControl, Disable, BreakOut
+GuiControl, Disable, TrainingIn
+GuiControl, Disable, TrainingOut
+GuiControl, Disable, SpecProjOut
+GuiControl, Disable, SpecProjIn
+GuiControl, Disable, MeetingOut
+GuiControl, Disable, MeetingIn
+if (InProg = 1 and Psed = 1)
+	gosub, Rsm
+ControlFocus, Casenum
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+FormatTime, VNow3, %A_Now%, h:mm tt, M/d
+GuiControl, , PTime, %VNow3%
+output = %A_UserName%`,Production,%VNow%,
+Global CapTime = true
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+;Enable other controls:
+GuiControl, Enable, Strt
+Sleep, 2000
+GuiControl, Enable, ProdOut
+return
+
+ProdOut:
+Gui, Submit, NoHide
+Ps = True
+;Disable controls:
+GuiControl, Disable, Strt
+GuiControl, Disable, ProdOut
+GuiControl, Disable, BreakOut
+GuiControl, Disable, TrainingOut
+GuiControl, Disable, LunchOut
+GuiControl, Disable, SpecProjOut
+GuiControl, Disable, MeetingOut
+if (InProg = 1 and Psed = 0) {
+	gosub, Pse
+}
+Global InMode = 0
+ControlFocus, Casenum
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+FormatTime, VNow3, %A_Now%, h:mm tt, M/d
+GuiControl, , PTime, %VNow3%
+output = %VNow%`n
+Global CapTime = false
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+;Enable other controls:
+Sleep, 2000
+GuiControl, Enable, ProdIn
+GuiControl, Enable, BreakIn
+GuiControl, Enable, TrainingIn
+GuiControl, Enable, LunchIn30
+GuiControl, Enable, LunchIn60
+GuiControl, Enable, SpecProjIn
+GuiControl, Enable, MeetingIn
+return
+
+BreakIn:
+Gui, Submit, NoHide
+;Disable controls:
+GuiControl, Disable, BreakIn
+GuiControl, Disable, ProdIn
+GuiControl, Disable, ProdOut
+GuiControl, Disable, LunchIn30
+GuiControl, Disable, LunchIn60
+GuiControl, Disable, LunchOut
+GuiControl, Disable, TrainingOut
+GuiControl, Disable, TrainingIn
+GuiControl, Disable, SpecProjOut
+GuiControl, Disable, SpecProjIn
+GuiControl, Disable, MeetingOut
+GuiControl, Disable, MeetingIn
+ControlFocus, Casenum
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+FormatTime, VNow3, %A_Now%, h:mm tt, M/d
+GuiControl, , BTime, %VNow3%
+output = %A_UserName%`,Break,%VNow%,
+Global CapTime = true
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+;Enable other controls:
+GoSub, ShowBreakTimer
+Sleep, 2000
+GuiControl, Enable, BreakOut
+return
+
+BreakOut:
+Gui, Submit, NoHide
+;Disable controls:
+GuiControl, Disable, BreakOut
+GuiControl, Disable, ProdOut
+GuiControl, Disable, TrainingOut
+GuiControl, Disable, LunchOut
+GuiControl, Disable, SpecProjOut
+GuiControl, Disable, MeetingOut
+ControlFocus, Casenum
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+FormatTime, VNow3, %A_Now%, h:mm tt, M/d
+GuiControl, , BTime, %VNow3%
+output = %VNow%`n
+Global CapTime = false
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+;Enable other controls:
+GoSub, HideBreakTimer
+Sleep, 2000
+GuiControl, Enable, ProdIn
+GuiControl, Enable, BreakIn
+GuiControl, Enable, TrainingIn
+GuiControl, Enable, LunchIn30
+GuiControl, Enable, LunchIn60
+GuiControl, Enable, SpecProjIn
+GuiControl, Enable, MeetingIn
+return
+
+LunchIn30:
+Gui, Submit, NoHide
+;Disable controls:
+GuiControl, Disable, LunchIn30
+GuiControl, Disable, LunchIn60
+GuiControl, Disable, ProdIn
+GuiControl, Disable, ProdOut
+GuiControl, Disable, BreakOut
+GuiControl, Disable, BreakIn
+GuiControl, Disable, TrainingOut
+GuiControl, Disable, TrainingIn
+GuiControl, Disable, SpecProjOut
+GuiControl, Disable, SpecProjIn
+GuiControl, Disable, MeetingOut
+GuiControl, Disable, MeetingIn
+ControlFocus, Casenum
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+FormatTime, VNow3, %A_Now%, h:mm tt, M/d
+GuiControl, , LTime, %VNow3%
+output = %A_UserName%`,Lunch,%VNow%,
+Global CapTime = true
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+;Enable other controls:
+GoSub, ShowLunchTimer30
+Sleep, 2000
+GuiControl, Enable, LunchOut
+return
+
+LunchIn60:
+Gui, Submit, NoHide
+;Disable controls:
+GuiControl, Disable, LunchIn30
+GuiControl, Disable, LunchIn60
+GuiControl, Disable, ProdIn
+GuiControl, Disable, ProdOut
+GuiControl, Disable, BreakOut
+GuiControl, Disable, BreakIn
+GuiControl, Disable, TrainingOut
+GuiControl, Disable, TrainingIn
+GuiControl, Disable, SpecProjOut
+GuiControl, Disable, SpecProjIn
+GuiControl, Disable, MeetingOut
+GuiControl, Disable, MeetingIn
+ControlFocus, Casenum
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+FormatTime, VNow3, %A_Now%, h:mm tt, M/d
+GuiControl, , LTime, %VNow3%
+output = %A_UserName%`,Lunch,%VNow%,
+Global CapTime = true
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+;Enable other controls:
+GoSub, ShowLunchTimer60
+Sleep, 2000
+GuiControl, Enable, LunchOut
+return
+
+LunchOut:
+Gui, Submit, NoHide
+;Disable controls:
+GuiControl, Disable, LunchOut
+GuiControl, Disable, BreakOut
+GuiControl, Disable, ProdOut
+GuiControl, Disable, TrainingOut
+GuiControl, Disable, SpecProjOut
+GuiControl, Disable, MeetingOut
+ControlFocus, Casenum
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+FormatTime, VNow3, %A_Now%, h:mm tt, M/d
+GuiControl, , LTime, %VNow3%
+output = %VNow%`n
+Global CapTime = false
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+;Enable other controls:
+GoSub, HideLunchTimer
+Sleep, 2000
+GuiControl, Enable, ProdIn
+GuiControl, Enable, BreakIn
+GuiControl, Enable, LunchIn30
+GuiControl, Enable, LunchIn60
+GuiControl, Enable, TrainingIn
+GuiControl, Enable, SpecProjIn
+GuiControl, Enable, MeetingIn
+return
+
+TrainingIn:
+Gui, Submit, NoHide
+Ps = False
+Global InMode = 1
+;Disable controls:
+GuiControl, Disable, TrainingIn
+GuiControl, Disable, ProdIn
+GuiControl, Disable, ProdOut
+GuiControl, Disable, BreakOut
+GuiControl, Disable, BreakIn
+GuiControl, Disable, LunchOut
+GuiControl, Disable, LunchIn30
+GuiControl, Disable, LunchIn60
+GuiControl, Disable, SpecProjOut
+GuiControl, Disable, SpecProjIn
+GuiControl, Disable, MeetingOut
+GuiControl, Disable, MeetingIn
+if (InProg = 1 and Psed = 1)
+	gosub, Rsm
+ControlFocus, Casenum
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+FormatTime, VNow3, %A_Now%, h:mm tt, M/d
+GuiControl, , TTime, %VNow3%
+output = %A_UserName%,Training,%VNow%,
+Global CapTime = true
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+;Enable other controls:
+GuiControl, Enable, Strt
+Sleep, 2000
+GuiControl, Enable, TrainingOut
+return
+
+TrainingOut:
+Gui, Submit, NoHide
+Ps = True
+;Disable controls:
+GuiControl, Disable, Strt
+GuiControl, Disable, TrainingOut
+GuiControl, Disable, BreakOut
+GuiControl, Disable, ProdOut
+GuiControl, Disable, LunchOut
+GuiControl, Disable, SpecProjOut
+GuiControl, Disable, MeetingOut
+if (InProg = 1 and Psed = 0) {
+	gosub, Pse
+}
+Global InMode = 0
+ControlFocus, Casenum
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+FormatTime, VNow3, %A_Now%, h:mm tt, M/d
+GuiControl, , TTime, %VNow3%
+output = %VNow%`n
+Global CapTime = false
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+;Enable other controls:
+Sleep, 2000
+GuiControl, Enable, ProdIn
+GuiControl, Enable, BreakIn
+GuiControl, Enable, LunchIn30
+GuiControl, Enable, LunchIn60
+GuiControl, Enable, TrainingIn
+GuiControl, Enable, SpecProjIn
+GuiControl, Enable, MeetingIn
+return
+
+MeetingIn:
+Gui, Submit, NoHide
+Ps = False
+Global InMode = 1
+;Disable controls:
+GuiControl, Disable, MeetingIn
+GuiControl, Disable, ProdIn
+GuiControl, Disable, ProdOut
+GuiControl, Disable, BreakOut
+GuiControl, Disable, BreakIn
+GuiControl, Disable, LunchOut
+GuiControl, Disable, LunchIn30
+GuiControl, Disable, LunchIn60
+GuiControl, Disable, TrainingIn
+GuiControl, Disable, TrainingOut
+GuiControl, Disable, SpecProjOut
+GuiControl, Disable, SpecProjIn
+if (InProg = 1 and Psed = 1)
+	gosub, Rsm
+ControlFocus, Casenum
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+FormatTime, VNow3, %A_Now%, h:mm tt, M/d
+GuiControl, , MTime, %VNow3%
+output = %A_UserName%,Meeting,%VNow%,
+Global CapTime = true
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+;Enable other controls:
+GuiControl, Enable, Strt
+Sleep, 2000
+GuiControl, Enable, MeetingOut
+return
+
+MeetingOut:
+Gui, Submit, NoHide
+Ps = True
+;Disable controls:
+GuiControl, Disable, Strt
+GuiControl, Disable, MeetingOut
+GuiControl, Disable, BreakOut
+GuiControl, Disable, ProdOut
+GuiControl, Disable, LunchOut
+GuiControl, Disable, TrainingOut
+GuiControl, Disable, SpecProjOut
+if (InProg = 1 and Psed = 0) {
+	gosub, Pse
+}
+Global InMode = 0
+ControlFocus, Casenum
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+FormatTime, VNow3, %A_Now%, h:mm tt, M/d
+GuiControl, , MTime, %VNow3%
+output = %VNow%`n
+Global CapTime = false
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+;Enable other controls:
+Sleep, 2000
+GuiControl, Enable, ProdIn
+GuiControl, Enable, BreakIn
+GuiControl, Enable, LunchIn30
+GuiControl, Enable, LunchIn60
+GuiControl, Enable, TrainingIn
+GuiControl, Enable, MeetingIn
+GuiControl, Enable, SpecProjIn
+return
+
+SpecProjIn:
+Gui, Submit, NoHide
+Ps = False
+Global InMode = 1
+;Disable controls:
+GuiControl, Disable, SpecProjIn
+GuiControl, Disable, ProdIn
+GuiControl, Disable, ProdOut
+GuiControl, Disable, BreakOut
+GuiControl, Disable, BreakIn
+GuiControl, Disable, LunchOut
+GuiControl, Disable, LunchIn30
+GuiControl, Disable, LunchIn60
+GuiControl, Disable, TrainingIn
+GuiControl, Disable, TrainingOut
+GuiControl, Disable, MeetingOut
+GuiControl, Disable, MeetingIn
+if (InProg = 1 and Psed = 1)
+	gosub, Rsm
+ControlFocus, Casenum
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+FormatTime, VNow3, %A_Now%, h:mm tt, M/d
+GuiControl, , STime, %VNow3%
+output = %A_UserName%,SpecialProject,%VNow%,
+Global CapTime = true
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+;Enable other controls:
+GuiControl, Enable, Strt
+Sleep, 2000
+GuiControl, Enable, SpecProjOut
+return
+
+SpecProjOut:
+Gui, Submit, NoHide
+Ps = True
+;Disable controls:
+GuiControl, Disable, Strt
+GuiControl, Disable, SpecProjOut
+GuiControl, Disable, ProdOut
+GuiControl, Disable, BreakOut
+GuiControl, Disable, ProdOut
+GuiControl, Disable, LunchOut
+GuiControl, Disable, TrainingOut
+if (InProg = 1 and Psed = 0) {
+	gosub, Pse
+}
+Global InMode = 0
+ControlFocus, Casenum
+FormatTime, VNow, %A_Now%, MM/dd/yyyy hh:mm:ss tt
+FormatTime, VNow2, %A_Now%, MMddyyyy
+FormatTime, VNow3, %A_Now%, h:mm tt, M/d
+GuiControl, , STime, %VNow3%
+output = %VNow%`n
+Global CapTime = false
+If (OPath1) {
+	FileAppend, %output%, %OPath1%\%VNow2%%A_UserName%.txt
+}
+If (OPath2) {
+	FileAppend, %output%, %OPath2%\%VNow2%%A_UserName%.txt
+}
+;Enable other controls:
+Sleep, 2000
+GuiControl, Enable, ProdIn
+GuiControl, Enable, BreakIn
+GuiControl, Enable, LunchIn30
+GuiControl, Enable, LunchIn60
+GuiControl, Enable, TrainingIn
+GuiControl, Enable, MeetingIn
+GuiControl, Enable, SpecProjIn
+return
+
+;Break and lunch timers===============================================================
+ShowBreakTimer:
+Progress, a m t fs70 fm12 zh10 CTgreen w250, % "15:00", Break time left:, Break Timer
+w .= "1500" , y := "1500"
+
+startoverbreak:
+t := 0, w := SubStr(y,1,2)*60 + SubStr(y,3,2)
+settimer, BreakTimer, 1000
+return
+
+BreakTimer:
+++t
+If (t < w)
+    Progress, % 100*(w-t)/w, % SubStr("00" floor((w-t)/60),-1) ":" SubStr("00" mod(w-t,60),-1), Break time left:, Break Timer
+Else If (t = w)
+    {
+    Progress, m t fs70 fm12 zh10 CTred w250, "00:00", Break is over!, Break Timer
+    SoundPlay, *48
+    }
+Else If (t > w)
+    Progress, , % SubStr("0" floor((t-w)/60), -1) ":" SubStr("0" mod(t-w,60), -1), Break is over!, Break Timer
+return
+
+HideBreakTimer:
+SetTimer, BreakTimer, OFF
+Progress, OFF
+return
+
+;===============================================================
+ShowLunchTimer30:
+Progress, a m t fs70 fm12 zh10 CTgreen w250, % "30:00", Lunch time left: , Lunch Timer
+w .= "30000" , y := "3000"
+
+startoverlunch30:
+t := 0, w := SubStr(y,1,2)*60 + SubStr(y,3,2)
+settimer, LunchTimer30, 1000
+return
+
+LunchTimer30:
+++t
+If (t < w)
+    Progress, % 100*(w-t)/w, % SubStr("00" floor((w-t)/60),-1) ":" SubStr("00" mod(w-t,60),-1), Lunch time left:, Lunch Timer
+Else If (t = w)
+    {
+    Progress, m t fs70 fm12 zh10 CTred w250, "00:00", Lunch is over!, Lunch Timer
+    SoundPlay, *48
+    }
+Else If (t > w)
+    Progress, , % SubStr("0" floor((t-w)/60), -1) ":" SubStr("0" mod(t-w,60), -1), Lunch is over!, Lunch Timer
+return
+
+;===============================================================
+ShowLunchTimer60:
+Progress, a m t fs70 fm12 zh10 CTgreen w250, % "60:00", Lunch time left: , Lunch Timer
+w .= "60000" , y := "6000"
+
+startoverlunch60:
+t := 0, w := SubStr(y,1,2)*60 + SubStr(y,3,2)
+settimer, LunchTimer60, 1000
+return
+
+LunchTimer60:
+++t
+If (t < w)
+    Progress, % 100*(w-t)/w, % SubStr("00" floor((w-t)/60),-1) ":" SubStr("00" mod(w-t,60),-1), Lunch time left:, Lunch Timer
+Else If (t = w)
+    {
+    Progress, m t fs70 fm12 zh10 CTred w250, "00:00", Lunch is over!, Lunch Timer
+    SoundPlay, *48
+    }
+Else If (t > w)
+    Progress, , % SubStr("0" floor((t-w)/60), -1) ":" SubStr("0" mod(t-w,60), -1), Lunch is over!, Lunch Timer
+return
+
+;===============================================================
+HideLunchTimer:
+SetTimer, LunchTimer30, OFF
+SetTimer, LunchTimer60, OFF
+Progress, OFF
+return
